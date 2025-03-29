@@ -5,12 +5,20 @@
 /* attributes */
 enum NL_UTIL_ATTRS {
   NL_UTIL_A_USPEC,
-  NL_UTIL_A_IFINDEX,
-  NL_UTIL_A_IFNAME,
-  NL_UTIL_A_IFMTU,
+  NL_UTIL_A_NETDEV,
   __NL_UTIL_A_MAX
 };
 #define NL_UTIL_A_MAX (__NL_UTIL_A_MAX - 1)
+
+/* nested attributes */
+enum {
+  NL_UTIL_NESTED_A_IFINDEX,
+  NL_UTIL_NESTED_A_IFNAME,
+  NL_UTIL_NESTED_A_IFMTU,
+  NL_UTIL_NESTED_A_STATE,
+  __NL_UTIL_NESTED_A_MAX
+};
+#define NL_UTIL_NESTED_A_MAX (__NL_UTIL_NESTED_A_MAX - 1)
 
 /* commands */
 enum NL_UTIL_CMDS {
