@@ -1,3 +1,4 @@
+#include <linux/if_arp.h>
 #include <linux/module.h>
 #include <linux/netdevice.h>
 #include <net/genetlink.h>
@@ -17,10 +18,16 @@ int l2_list_doit(struct sk_buff *sender_buff, struct genl_info *info);
 int l2_iid_doit(struct sk_buff *sender_buff, struct genl_info *info);
 int nlmsg_err_doit(struct sk_buff *sender_buff, struct genl_info *info);
 
+struct nla_policy nl_util_nested_policy[NL_UTIL_NESTED_A_MAX + 1] = {
+    [NL_UTIL_NESTED_A_IFINDEX] = {.type = NLA_U32},
+    [NL_UTIL_NESTED_A_IFNAME] = {.type = NLA_STRING},
+    [NL_UTIL_NESTED_A_IFMTU] = {.type = NLA_U32},
+};
+
 /* attribute policy */
 struct nla_policy nl_util_genl_policy[NL_UTIL_A_MAX + 1] = {
     [NL_UTIL_A_USPEC] = {.type = NLA_UNSPEC},
-    [NL_UTIL_A_IFINDEX] = {.type = NLA_U32},
+    [NL_UTIL_A_NETDEV] = NLA_POLICY_NESTED(nl_util_nested_policy),
 };
 
 /* operation defenition */
@@ -135,13 +142,28 @@ int l2_list_doit(struct sk_buff *sender_buff, struct genl_info *info) {
   }
 
   // locking is handled automatically
+  // (the amount of netdevs is equal to the amount of nested
+  // attributes)
   for_each_netdev(&init_net, netdev) {
-    pr_info("found a device: [%s]\n", netdev->name);
-    rc = nla_put_string(reply_buff, NL_UTIL_A_IFNAME, netdev->name);
-    if (rc < 0) {
-      pr_err("failed to add an attribute\n");
-      nlmsg_free(reply_buff);
-      return rc;
+    pr_debug("found a device: [%s]\n", netdev->name);
+    if (netdev->type == ARPHRD_ETHER) {
+      struct nlattr *start =
+          nla_nest_start_noflag(reply_buff, NL_UTIL_A_NETDEV);
+      if (start == NULL) {
+        pr_err("error starting nested attribute\n");
+        return -ENOMEM;
+      }
+
+      if (nla_put_uint(reply_buff, NL_UTIL_NESTED_A_IFINDEX, netdev->ifindex) ||
+          nla_put_string(reply_buff, NL_UTIL_NESTED_A_IFNAME, netdev->name) ||
+          nla_put_uint(reply_buff, NL_UTIL_NESTED_A_IFMTU, netdev->mtu)) {
+        pr_err("error putting something nested\n");
+        nla_nest_cancel(reply_buff, start);
+        return -ENOMEM;
+      }
+
+      // end nested
+      nla_nest_end(reply_buff, start);
     }
   }
 

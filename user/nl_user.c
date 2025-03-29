@@ -19,6 +19,7 @@ int open_and_bind();
 int resolve_family_id_by_name(const char *fam_name);
 void handle_l2_list();
 void handle_l2_by_iid(const char *ifidx);
+void parse_nl_util_response(struct nlattr *nl_na, int rem);
 
 int nl_fd;                     // netlink socket's file descriptor
 struct sockaddr_nl nl_address; // netlink address
@@ -208,10 +209,42 @@ void handle_l2_list() {
 
   // parse the response
   nl_na = (struct nlattr *)GENLMSG_DATA(&nl_response_msg);
-  while (nl_na->nla_type == NL_UTIL_A_IFNAME) {
-    printf("iface name: %s\n", (char *)NLA_DATA(nl_na));
-    nl_na = (struct nlattr *)((char *)nl_na + NLA_ALIGN(nl_na->nla_len));
-  }
+  int rem = GENLMSG_PAYLOAD(&nl_response_msg.n);
+  parse_nl_util_response(nl_na, rem);
 }
 
 void handle_l2_by_iid(const char *ifidx) {}
+
+// nlmsghdr -> genlmsghdr -> NL_UTIL_A_NETDEV -> (nested attrs) ->
+// NL_UTIL_A_NETDEV -> (nested_attrs) -> ...
+void parse_nl_util_response(struct nlattr *nl_na, int rem) {
+  while (rem >= sizeof(*nl_na)) {
+    if (nl_na->nla_type == NL_UTIL_A_NETDEV) {
+      struct nlattr *pos = (struct nlattr *)NLA_DATA(nl_na);
+      int rem_nest = NLMSG_ALIGN(nl_na->nla_len) - NLA_HDRLEN;
+
+      while (rem_nest >= sizeof(*pos)) {
+        switch (pos->nla_type) {
+        case NL_UTIL_NESTED_A_IFINDEX:
+          printf("%d: ", *(__u32 *)NLA_DATA(pos));
+          break;
+        case NL_UTIL_NESTED_A_IFNAME:
+          printf("%s: ", (char *)NLA_DATA(pos));
+          break;
+        case NL_UTIL_NESTED_A_IFMTU:
+          printf("mtu %d\n", *(__u32 *)NLA_DATA(pos));
+          break;
+        default:
+          printf("unknown attribute received\n");
+        }
+        rem_nest -= NLA_ALIGN(pos->nla_len);
+        // go to the next nested device
+        pos = (struct nlattr *)((char *)pos + NLA_ALIGN(pos->nla_len));
+      }
+    }
+
+    rem -= NLA_ALIGN(nl_na->nla_len);
+    // go to the next device
+    nl_na = (struct nlattr *)((char *)nl_na + NLA_ALIGN(nl_na->nla_len));
+  }
+}
