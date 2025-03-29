@@ -1,0 +1,34 @@
+# ignore compiled binaries
+*.o
+*.ko
+*.mod
+*.mod.c
+*.mod.o
+*.cmd
+*.order
+*.symvers
+*.out
+
+# ignore kernel build files
+*.so
+*.a
+*.la
+*.lo
+*.s
+*.dwo
+*.d
+
+# ignore generated configuration files
+Module.symvers
+modules.order
+
+# ignore temporary and backup files
+*.swp
+*.swo
+*.bak
+*.tmp
+*.cache
+
+# ignore directories commonly generated during builds
+user/nl_user.out
+user/*.o
