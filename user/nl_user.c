@@ -1,5 +1,5 @@
 #include "netlink_common.h"
-#include <linux/genetlink.h>
+#include "nl_user.h"
 #include <linux/netlink.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,291 +7,377 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-// get a pointer to the first attribute in the Generic Netlink message.
-#define GENLMSG_DATA(glh) ((void *)(NLMSG_DATA(glh) + GENL_HDRLEN))
+/**
+ * struct nl_msg - Netlink message structure
+ * @n: Netlink message header
+ * @g: Generic netlink header
+ * @buf: Buffer for attributes and payload
+ */
+struct nl_msg {
+	struct nlmsghdr n; /* Netlink message header */
+	struct genlmsghdr g; /* Generic netlink header */
+	char buf[NL_MSG_BUF_SIZE]; /* Buffer for attributes and payload */
+};
 
-// get the total length of the attributes in the Generic Netlink message.
-#define GENLMSG_PAYLOAD(glh) (NLMSG_PAYLOAD(glh, 0) - GENL_HDRLEN)
+/**
+ * struct nl_context - Netlink communication context
+ * @fd: Netlink socket file descriptor
+ * @fam_id: Netlink family ID
+ * @nl_address: Netlink socket address
+ * @req: Request message buffer
+ * @res: Response message buffer
+ */
+struct nl_context {
+	int fd; /* Netlink socket file descriptor */
+	int fam_id; /* Netlink family ID */
+	struct sockaddr_nl nl_address; /* Netlink socket address */
+	struct nl_msg *req; /* Request message buffer */
+	struct nl_msg *res; /* Response message buffer */
+};
 
-// get a pointer to the data part of a Netlink attribute.
-#define NLA_DATA(na) ((void *)((char *)(na) + NLA_HDRLEN))
-
-int open_and_bind();
-int resolve_family_id_by_name(const char *fam_name);
-void handle_l2_list();
-void handle_l2_by_iid(const int ifindex);
-void parse_nl_util_response(struct nlattr *nl_na, int rem);
-
-int nl_fd; // netlink socket's file descriptor
-struct sockaddr_nl nl_address; // netlink address
-int nl_family_id = -1;
-int nl_rxtx_length; // sent/received length
-struct nlattr *na; // netlink attributes
-struct nlattr *na_nested;
-
-struct {
-	struct nlmsghdr n;
-	struct genlmsghdr g;
-	char buf[256];
-} nl_request_msg, nl_response_msg;
-
+/**
+ * main - Program entry point
+ * @argc: Argument count
+ * @argv: Argument vector
+ *
+ * Returns: 0 on success, non-zero on failure
+ */
 int main(int argc, const char *argv[])
 {
 	if (argc < 2) {
-		fprintf(stderr, "Usage: %s show <L2_IID>\n", argv[0]);
+		fprintf(stderr, "Usage: %s show [L2_IID]\n", argv[0]);
 		return 1;
 	}
 
-	if (open_and_bind() < 0) {
-		return -1;
+	/* Initialize program context */
+	struct nl_context *ctx = nl_context_init();
+	if (!ctx) {
+		perror("Failed to initialize context");
+		return 1;
 	}
 
-	if (resolve_family_id_by_name(FAMILY_NAME) < 0) {
-		perror("resolve_family_by_name");
-		close(nl_fd);
-		return -1;
+	/* Open and bind netlink socket */
+	if (open_and_bind(ctx) < 0) {
+		nl_context_free(ctx);
+		return 1;
 	}
 
-	// parse commands
-	if (strcmp(argv[1], "show") == 0 && argc == 2) {
-		handle_l2_list();
-	} else if (strcmp(argv[1], "show") == 0 && argc == 3) {
-		handle_l2_by_iid(atoi(argv[2]));
+	/* Resolve family ID for communication */
+	if (resolve_family_id_by_name(ctx, FAMILY_NAME) < 0) {
+		perror("Failed to resolve family ID");
+		nl_context_free(ctx);
+		return 1;
+	}
+
+	/* Handle command line arguments */
+	if (strcmp(argv[1], "show") == 0) {
+		if (argc == 2) {
+			handle_l2_list(ctx);
+		} else if (argc == 3) {
+			handle_l2_by_ifindex(ctx, atoi(argv[2]));
+		} else {
+			fprintf(stderr, "Usage: %s show [L2_IID]\n", argv[0]);
+			nl_context_free(ctx);
+			return 1;
+		}
 	} else {
-		fprintf(stderr, "Usage: %s show <L2_IID>\n", argv[0]);
-		close(nl_fd);
+		fprintf(stderr, "Usage: %s show [L2_IID]\n", argv[0]);
+		nl_context_free(ctx);
 		return 1;
 	}
 
-	close(nl_fd);
+	nl_context_free(ctx);
 	return 0;
 }
 
-int open_and_bind()
+/**
+ * nl_context_init - Initialize netlink context
+ *
+ * Returns: Pointer to allocated context, NULL on failure
+ */
+struct nl_context *nl_context_init(void)
 {
-	// create generic netlink socket
-	nl_fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_GENERIC);
-	if (nl_fd < 0) {
-		perror("socket()");
+	struct nl_context *ctx = calloc(1, sizeof(struct nl_context));
+	if (!ctx) {
+		perror("Failed to allocate context");
+		return NULL;
+	}
+
+	ctx->fam_id = -1;
+	ctx->fd = -1;
+	ctx->req = calloc(1, sizeof(struct nl_msg));
+	ctx->res = calloc(1, sizeof(struct nl_msg));
+	if (!ctx->req || !ctx->res) {
+		perror("Failed to allocate message buffers");
+		free(ctx->req);
+		free(ctx->res);
+		free(ctx);
+		return NULL;
+	}
+
+	return ctx;
+}
+
+/**
+ * nl_context_free - Free netlink context resources
+ * @ctx: Context to free
+ */
+void nl_context_free(struct nl_context *ctx)
+{
+	if (!ctx)
+		return;
+
+	if (ctx->fd >= 0) {
+		close(ctx->fd);
+	}
+	free(ctx->req);
+	free(ctx->res);
+	free(ctx);
+}
+
+/**
+ * set_nl_addr - Configure netlink address structure
+ * @ctx: Netlink context
+ */
+void set_nl_addr(struct nl_context *ctx)
+{
+	memset(&ctx->nl_address, 0, sizeof(struct sockaddr_nl));
+	ctx->nl_address.nl_family = AF_NETLINK;
+	ctx->nl_address.nl_groups = 0; /* No multicast groups */
+	ctx->nl_address.nl_pid = 0; /* Kernel PID */
+	ctx->nl_address.nl_pad = 0;
+}
+
+/**
+ * open_and_bind - Create and bind netlink socket
+ * @ctx: Netlink context
+ *
+ * Returns: 0 on success, -1 on failure
+ */
+int open_and_bind(struct nl_context *ctx)
+{
+	/* Create netlink socket */
+	ctx->fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_GENERIC);
+	if (ctx->fd < 0) {
+		perror("Failed to create socket");
 		return -1;
 	}
 
-	// bind the socket to nl_address
-	memset(&nl_address, 0, sizeof(nl_address));
-	nl_address.nl_family = AF_NETLINK;
-
-	if (bind(nl_fd, (struct sockaddr *)&nl_address, sizeof(nl_address)) <
-	    0) {
-		perror("bind()");
+	/* Bind socket to address */
+	memset(&ctx->nl_address, 0, sizeof(struct sockaddr_nl));
+	ctx->nl_address.nl_family = AF_NETLINK;
+	if (bind(ctx->fd, (struct sockaddr *)&ctx->nl_address,
+		 sizeof(struct sockaddr_nl)) < 0) {
+		perror("Failed to bind socket");
+		close(ctx->fd);
 		return -1;
 	}
 
 	return 0;
 }
 
-// nlmsghdr -> genlmsghdr -> nl_attrs -> payload
-int resolve_family_id_by_name(const char *fam_name)
+/**
+ * resolve_family_id_by_name - Resolve netlink family ID by name
+ * @ctx: Netlink context
+ * @fam_name: Family name to resolve
+ *
+ * Returns: 0 on success, -1 on failure
+ */
+int resolve_family_id_by_name(struct nl_context *ctx, const char *fam_name)
 {
-	nl_request_msg.n.nlmsg_len =
-		NLMSG_LENGTH(GENL_HDRLEN); // total length of the msg
-	nl_request_msg.n.nlmsg_type = GENL_ID_CTRL;
-	nl_request_msg.n.nlmsg_flags = NLM_F_REQUEST;
-	nl_request_msg.n.nlmsg_seq = 0;
-	nl_request_msg.n.nlmsg_pid = getpid();
-	nl_request_msg.g.cmd = CTRL_CMD_GETFAMILY;
-	nl_request_msg.g.version = 0x1;
+	ssize_t rxtx_len;
+	struct nlattr *na;
+	struct nl_msg *req, *res;
 
-	// populate the payload's "netlink attributes"
-	na = (struct nlattr *)GENLMSG_DATA(&nl_request_msg);
-	na->nla_len =
-		strlen(fam_name) + 1 + NLA_HDRLEN; // header + data(family name)
+	/* Prepare request message */
+	req = set_req(ctx, GENL_ID_CTRL, CTRL_CMD_GETFAMILY);
+	na = (struct nlattr *)GENLMSG_DATA(req);
+	na->nla_len = strlen(fam_name) + 1 + NLA_HDRLEN;
 	na->nla_type = CTRL_ATTR_FAMILY_NAME;
 	strcpy(NLA_DATA(na), fam_name);
+	req->n.nlmsg_len += NLMSG_ALIGN(na->nla_len);
 
-	/* align if the attribute isn't a multiple of 4(padding) */
-	nl_request_msg.n.nlmsg_len += NLMSG_ALIGN(na->nla_len);
-
-	memset(&nl_address, 0, sizeof(nl_address));
-	nl_address.nl_family = AF_NETLINK;
-	nl_address.nl_groups = 0; // we don't use multicast groups
-	nl_address.nl_pid = 0; // kernel pid is 0
-	nl_address.nl_pad = 0;
-
-	// send the family id request message to the netlink controller
-	nl_rxtx_length = sendto(nl_fd, (char *)&nl_request_msg,
-				nl_request_msg.n.nlmsg_len, 0,
-				(struct sockaddr *)&nl_address,
-				sizeof(nl_address));
-	if (nl_rxtx_length != nl_request_msg.n.nlmsg_len) {
-		perror("sendto()");
+	/* Send request */
+	set_nl_addr(ctx);
+	rxtx_len = sendto(ctx->fd, (char *)req, req->n.nlmsg_len, 0,
+			  (struct sockaddr *)&ctx->nl_address,
+			  sizeof(struct sockaddr_nl));
+	if (rxtx_len != req->n.nlmsg_len) {
+		perror("Failed to send family ID request");
 		return -1;
 	}
 
-	// receive reply from the kernel
-	nl_rxtx_length = recv(nl_fd, (char *)&nl_response_msg,
-			      sizeof(nl_response_msg), 0);
-	if (nl_rxtx_length < 0) {
-		perror("recv()");
+	/* Receive response */
+	res = set_res(ctx);
+	rxtx_len = recv(ctx->fd, (char *)res, sizeof(*res), 0);
+	if (rxtx_len < 0) {
+		perror("Failed to receive family ID response");
 		return -1;
 	}
 
-	// Validate response message
-	if (!NLMSG_OK((&nl_response_msg.n), nl_rxtx_length)) {
-		fprintf(stderr, "family ID request : invalid message\n");
-		fprintf(stderr,
-			"error validating family id request result: invalid length\n");
+	/* Validate response */
+	if (!NLMSG_OK((&res->n), rxtx_len)) {
+		LOG_ERROR("Invalid response length for family ID request\n");
 		return -1;
 	}
-	if (nl_response_msg.n.nlmsg_type == NLMSG_ERROR) { // error
-		fprintf(stderr, "family ID request : receive error\n");
-		fprintf(stderr,
-			"error validating family id request result: receive error\n");
+	if (res->n.nlmsg_type == NLMSG_ERROR) {
+		LOG_ERROR("Received error response for family ID request\n");
 		return -1;
 	}
 
-	// Extract family name
-	na = (struct nlattr *)GENLMSG_DATA(&nl_response_msg);
+	/* Parse family ID from response */
+	na = (struct nlattr *)GENLMSG_DATA(res);
 	if (na->nla_type == CTRL_ATTR_FAMILY_NAME) {
-		printf("family name is: %s\n", (char *)NLA_DATA(na));
+		LOG_INFO("Family name: %s\n", (char *)NLA_DATA(na));
 	}
-
-	/* shift the pointer. CTRL_ATTR_FAMILY_NAME -> CTRL_ATTR_FAMILY_ID */
 	na = (struct nlattr *)((char *)na + NLA_ALIGN(na->nla_len));
-
 	if (na->nla_type == CTRL_ATTR_FAMILY_ID) {
-		nl_family_id = *(__u16 *)NLA_DATA(na);
+		ctx->fam_id = *(__u16 *)NLA_DATA(na);
 	}
-
-	printf("family id is: %d\n", nl_family_id);
 
 	return 0;
 }
 
-void handle_l2_list()
+/**
+ * set_req - Prepare a netlink request message
+ * @ctx: Netlink context
+ * @fam_id: Family ID
+ * @cmd: Command to execute
+ *
+ * Returns: Pointer to prepared request message
+ */
+struct nl_msg *set_req(struct nl_context *ctx, const int fam_id, const int cmd)
 {
-	memset(&nl_request_msg, 0, sizeof(nl_request_msg));
-	memset(&nl_response_msg, 0, sizeof(nl_response_msg));
+	memset(ctx->req, 0, sizeof(struct nl_msg));
+	ctx->req->n.nlmsg_len = NLMSG_LENGTH(GENL_HDRLEN);
+	ctx->req->n.nlmsg_type = fam_id;
+	ctx->req->n.nlmsg_flags = NLM_F_REQUEST;
+	ctx->req->n.nlmsg_seq = 0;
+	ctx->req->n.nlmsg_pid = getpid();
+	ctx->req->g.cmd = cmd;
+	ctx->req->g.version = 0x1;
+	return ctx->req;
+}
 
-	nl_request_msg.n.nlmsg_len = NLMSG_LENGTH(GENL_HDRLEN);
-	nl_request_msg.n.nlmsg_type = nl_family_id;
-	nl_request_msg.n.nlmsg_flags = NLM_F_REQUEST;
-	nl_request_msg.n.nlmsg_seq = 0; // no need to split messages
-	nl_request_msg.n.nlmsg_pid = getpid();
-	nl_request_msg.g.cmd = NL_UTIL_C_L2_LIST;
-	nl_request_msg.g.version = 1;
+/**
+ * set_res - Prepare response buffer
+ * @ctx: Netlink context
+ *
+ * Returns: Pointer to prepared response message
+ */
+struct nl_msg *set_res(struct nl_context *ctx)
+{
+	memset(ctx->res, 0, sizeof(struct nl_msg));
+	return ctx->res;
+}
 
-	memset(&nl_address, 0, sizeof(nl_address));
-	nl_address.nl_family = AF_NETLINK;
-	nl_address.nl_groups = 0; // we don't use multicast groups
-	nl_address.nl_pid = 0; // kernel pid is 0
-	nl_address.nl_pad = 0;
+/**
+ * handle_l2_list - Request and process list of L2 interfaces
+ * @ctx: Netlink context
+ */
+void handle_l2_list(struct nl_context *ctx)
+{
+	ssize_t rxtx_len;
+	struct nlattr *na;
+	struct nl_msg *req, *res;
 
-	nl_rxtx_length = sendto(nl_fd, (char *)&nl_request_msg,
-				nl_request_msg.n.nlmsg_len, 0,
-				(struct sockaddr *)&nl_address,
-				sizeof(nl_address));
-	if (nl_rxtx_length != nl_request_msg.n.nlmsg_len) {
-		perror("not everything was sent: sendto()");
+	/* Prepare and send request */
+	req = set_req(ctx, ctx->fam_id, NL_UTIL_C_L2_LIST);
+	set_nl_addr(ctx);
+	rxtx_len = sendto(ctx->fd, (char *)req, req->n.nlmsg_len, 0,
+			  (struct sockaddr *)&ctx->nl_address,
+			  sizeof(struct sockaddr_nl));
+	if (rxtx_len != req->n.nlmsg_len) {
+		LOG_ERROR("Failed to send L2 list request\n");
 		return;
 	}
 
-	nl_rxtx_length = recv(nl_fd, (char *)&nl_response_msg,
-			      sizeof(nl_response_msg), 0);
-	if (nl_rxtx_length < 0) {
-		perror("recv()");
+	/* Receive response */
+	res = set_res(ctx);
+	rxtx_len = recv(ctx->fd, (char *)res, sizeof(*res), 0);
+	if (rxtx_len < 0) {
+		perror("Failed to receive L2 list response");
 		return;
 	}
 
-	// validate response message
-	if (!NLMSG_OK((&nl_response_msg.n), nl_rxtx_length)) {
-		fprintf(stderr,
-			"NL_UTIL_C_L2_LIST request : invalid message\n");
-		fprintf(stderr,
-			"error validating NL_UTIL_C_L2_LIST request result: invalid length\n");
+	/* Validate response */
+	if (!NLMSG_OK((&res->n), rxtx_len)) {
+		LOG_ERROR("Invalid L2 list response length\n");
+		return;
 	}
-	if (nl_response_msg.n.nlmsg_type == NLMSG_ERROR) {
-		fprintf(stderr, "NL_UTIL_C_L2_LIST request : receive error\n");
-		fprintf(stderr,
-			"error validating NL_UTIL_C_L2_LIST request result: receive error\n");
+	if (res->n.nlmsg_type == NLMSG_ERROR) {
+		LOG_ERROR("Received error in L2 list response\n");
+		return;
 	}
 
-	// parse the response
-	na = (struct nlattr *)GENLMSG_DATA(&nl_response_msg);
-	int rem = GENLMSG_PAYLOAD(&nl_response_msg.n);
+	/* Parse response */
+	na = (struct nlattr *)GENLMSG_DATA(res);
+	int rem = GENLMSG_PAYLOAD(&res->n);
 	parse_nl_util_response(na, rem);
 }
 
-void handle_l2_by_iid(const int ifindex)
+/**
+ * handle_l2_by_ifindex - Request and process interface info by index
+ * @ctx: Netlink context
+ * @ifindex: Interface index to query
+ */
+void handle_l2_by_ifindex(struct nl_context *ctx, const int ifindex)
 {
-	memset(&nl_request_msg, 0, sizeof(nl_request_msg));
-	memset(&nl_response_msg, 0, sizeof(nl_response_msg));
+	ssize_t rxtx_len;
+	struct nlattr *na, *na_nested;
+	struct nl_msg *req, *res;
 
-	nl_request_msg.n.nlmsg_len = NLMSG_LENGTH(GENL_HDRLEN);
-	nl_request_msg.n.nlmsg_type = nl_family_id;
-	nl_request_msg.n.nlmsg_flags = NLM_F_REQUEST;
-	nl_request_msg.n.nlmsg_seq = 0; // no need to split messages
-	nl_request_msg.n.nlmsg_pid = getpid();
-	nl_request_msg.g.cmd = NL_UTIL_C_L2_IID;
-	nl_request_msg.g.version = 1;
-
-	memset(&nl_address, 0, sizeof(nl_address));
-	nl_address.nl_family = AF_NETLINK;
-	nl_address.nl_groups = 0; // we don't use multicast groups
-	nl_address.nl_pid = 0; // kernel pid is 0
-	nl_address.nl_pad = 0;
-
-	na = (struct nlattr *)GENLMSG_DATA(&nl_request_msg);
-
-	/* mark as nested */
+	/* Prepare request with nested attribute */
+	req = set_req(ctx, ctx->fam_id, NL_UTIL_C_L2_IID);
+	set_nl_addr(ctx);
+	na = (struct nlattr *)GENLMSG_DATA(req);
 	na->nla_type = NLA_F_NESTED | NL_UTIL_A_NETDEV;
 	na->nla_len = NLA_HDRLEN;
-
 	na_nested = (struct nlattr *)NLA_DATA(na);
 	na_nested->nla_type = NL_UTIL_NESTED_A_IFINDEX;
-	na_nested->nla_len = NLA_HDRLEN + sizeof(__u32);
-	*(__u32 *)NLA_DATA(na_nested) = (__u32)ifindex;
-
+	na_nested->nla_len = NLA_HDRLEN + sizeof(int);
+	*(int *)NLA_DATA(na_nested) = ifindex;
 	na->nla_len += NLA_ALIGN(na_nested->nla_len);
+	req->n.nlmsg_len += NLMSG_ALIGN(na->nla_len);
 
-	/* align if the attribute isn't a multiple of 4(padding) */
-	nl_request_msg.n.nlmsg_len += NLMSG_ALIGN(na->nla_len);
-
-	nl_rxtx_length = sendto(nl_fd, (char *)&nl_request_msg,
-				nl_request_msg.n.nlmsg_len, 0,
-				(struct sockaddr *)&nl_address,
-				sizeof(nl_address));
-	if (nl_rxtx_length != nl_request_msg.n.nlmsg_len) {
-		perror("not everything was send: sendto()");
+	/* Send request */
+	rxtx_len = sendto(ctx->fd, (char *)req, req->n.nlmsg_len, 0,
+			  (struct sockaddr *)&ctx->nl_address,
+			  sizeof(struct sockaddr_nl));
+	if (rxtx_len != req->n.nlmsg_len) {
+		LOG_ERROR("Failed to send interface query request\n");
 		return;
 	}
 
-	nl_rxtx_length = recv(nl_fd, (char *)&nl_response_msg,
-			      sizeof(nl_response_msg), 0);
-	if (nl_rxtx_length < 0) {
-		perror("recv()");
+	/* Receive response */
+	res = set_res(ctx);
+	rxtx_len = recv(ctx->fd, (char *)res, sizeof(*res), 0);
+	if (rxtx_len < 0) {
+		LOG_ERROR("Failed to receive interface query response\n");
 		return;
 	}
 
-	// validate response message
-	if (!NLMSG_OK((&nl_response_msg.n), nl_rxtx_length)) {
-		fprintf(stderr, "NL_UTIL_C_L2_IID request : invalid message\n");
-		fprintf(stderr,
-			"error validating NL_UTIL_C_L2_IID request result: invalid length\n");
+	/* Validate response */
+	if (!NLMSG_OK((&res->n), rxtx_len)) {
+		LOG_ERROR("Invalid interface query response length\n");
+		return;
 	}
-	if (nl_response_msg.n.nlmsg_type == NLMSG_ERROR) {
-		fprintf(stderr, "NL_UTIL_C_L2_IID request : receive error\n");
-		fprintf(stderr,
-			"error validating NL_UTIL_C_L2_IID request result: receive error\n");
+	if (res->n.nlmsg_type == NLMSG_ERROR) {
+		LOG_ERROR("Received error in interface query response\n");
+		return;
 	}
 
-	// parse the response
-	na = (struct nlattr *)GENLMSG_DATA(&nl_response_msg);
-	int rem = GENLMSG_PAYLOAD(&nl_response_msg.n);
+	/* Parse response */
+	na = (struct nlattr *)GENLMSG_DATA(res);
+	int rem = GENLMSG_PAYLOAD(&res->n);
 	parse_nl_util_response(na, rem);
 }
 
-// nlmsghdr -> genlmsghdr -> NL_UTIL_A_NETDEV -> (nested attrs) ->
-// NL_UTIL_A_NETDEV -> (nested_attrs) -> ...
+/**
+ * parse_nl_util_response - Parse and display netlink response attributes
+ * @nl_na: Netlink attribute to parse
+ * @rem: Remaining bytes in message
+ */
 void parse_nl_util_response(struct nlattr *nl_na, int rem)
 {
 	while (rem >= sizeof(*nl_na)) {
@@ -319,19 +405,16 @@ void parse_nl_util_response(struct nlattr *nl_na, int rem)
 					       mac[4], mac[5]);
 					break;
 				default:
-					printf("unknown attribute received\n");
+					LOG_INFO("Unknown attribute type: %d\n",
+						 pos->nla_type);
 				}
-
 				rem_nest -= NLA_ALIGN(pos->nla_len);
-				// go to the next nested attribute
 				pos = (struct nlattr *)((char *)pos +
 							NLA_ALIGN(
 								pos->nla_len));
 			}
 		}
-
 		rem -= NLA_ALIGN(nl_na->nla_len);
-		// go to the next device
 		nl_na = (struct nlattr *)((char *)nl_na +
 					  NLA_ALIGN(nl_na->nla_len));
 	}
