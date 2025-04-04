@@ -1,11 +1,13 @@
-#include "netlink_common.h"
 #include "nl_user.h"
 #include <linux/netlink.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include "netlink_common.h"
+#include "nl_parse.h"
 
 /**
  * struct nl_msg - Netlink message structure
@@ -185,7 +187,7 @@ int open_and_bind(struct nl_context *ctx)
  */
 int resolve_family_id_by_name(struct nl_context *ctx, const char *fam_name)
 {
-	ssize_t rxtx_len;
+	int rxtx_len;
 	struct nlattr *na;
 	struct nl_msg *req, *res;
 
@@ -227,9 +229,6 @@ int resolve_family_id_by_name(struct nl_context *ctx, const char *fam_name)
 
 	/* Parse family ID from response */
 	na = (struct nlattr *)GENLMSG_DATA(res);
-	if (na->nla_type == CTRL_ATTR_FAMILY_NAME) {
-		LOG_INFO("Family name: %s\n", (char *)NLA_DATA(na));
-	}
 	na = (struct nlattr *)((char *)na + NLA_ALIGN(na->nla_len));
 	if (na->nla_type == CTRL_ATTR_FAMILY_ID) {
 		ctx->fam_id = *(__u16 *)NLA_DATA(na);
@@ -277,7 +276,8 @@ struct nl_msg *set_res(struct nl_context *ctx)
  */
 void handle_l2_list(struct nl_context *ctx)
 {
-	ssize_t rxtx_len;
+	int rxtx_len;
+	size_t rem;
 	struct nlattr *na;
 	struct nl_msg *req, *res;
 
@@ -312,7 +312,7 @@ void handle_l2_list(struct nl_context *ctx)
 
 	/* Parse response */
 	na = (struct nlattr *)GENLMSG_DATA(res);
-	int rem = GENLMSG_PAYLOAD(&res->n);
+	rem = GENLMSG_PAYLOAD(&res->n);
 	parse_nl_util_response(na, rem);
 }
 
@@ -323,7 +323,8 @@ void handle_l2_list(struct nl_context *ctx)
  */
 void handle_l2_by_ifindex(struct nl_context *ctx, const int ifindex)
 {
-	ssize_t rxtx_len;
+	int rxtx_len;
+	size_t rem;
 	struct nlattr *na, *na_nested;
 	struct nl_msg *req, *res;
 
@@ -369,53 +370,6 @@ void handle_l2_by_ifindex(struct nl_context *ctx, const int ifindex)
 
 	/* Parse response */
 	na = (struct nlattr *)GENLMSG_DATA(res);
-	int rem = GENLMSG_PAYLOAD(&res->n);
+	rem = GENLMSG_PAYLOAD(&res->n);
 	parse_nl_util_response(na, rem);
-}
-
-/**
- * parse_nl_util_response - Parse and display netlink response attributes
- * @nl_na: Netlink attribute to parse
- * @rem: Remaining bytes in message
- */
-void parse_nl_util_response(struct nlattr *nl_na, int rem)
-{
-	while (rem >= sizeof(*nl_na)) {
-		if (nl_na->nla_type == NL_UTIL_A_NETDEV) {
-			struct nlattr *pos = (struct nlattr *)NLA_DATA(nl_na);
-			int rem_nest = NLMSG_ALIGN(nl_na->nla_len) - NLA_HDRLEN;
-
-			while (rem_nest >= sizeof(*pos)) {
-				unsigned char *mac;
-				switch (pos->nla_type) {
-				case NL_UTIL_NESTED_A_IFINDEX:
-					printf("%d: ", *(__u32 *)NLA_DATA(pos));
-					break;
-				case NL_UTIL_NESTED_A_IFNAME:
-					printf("%s: ", (char *)NLA_DATA(pos));
-					break;
-				case NL_UTIL_NESTED_A_IFMTU:
-					printf("mtu %d\n",
-					       *(__u32 *)NLA_DATA(pos));
-					break;
-				case NL_UTIL_NESTED_A_IFMAC:
-					mac = (__u8 *)NLA_DATA(pos);
-					printf("link/ether: %02x:%02x:%02x:%02x:%02x:%02x\n",
-					       mac[0], mac[1], mac[2], mac[3],
-					       mac[4], mac[5]);
-					break;
-				default:
-					LOG_INFO("Unknown attribute type: %d\n",
-						 pos->nla_type);
-				}
-				rem_nest -= NLA_ALIGN(pos->nla_len);
-				pos = (struct nlattr *)((char *)pos +
-							NLA_ALIGN(
-								pos->nla_len));
-			}
-		}
-		rem -= NLA_ALIGN(nl_na->nla_len);
-		nl_na = (struct nlattr *)((char *)nl_na +
-					  NLA_ALIGN(nl_na->nla_len));
-	}
 }

@@ -20,11 +20,10 @@ void nl_context_free(struct nl_context *ctx);
 int open_and_bind(struct nl_context *ctx);
 int resolve_family_id_by_name(struct nl_context *ctx, const char *fam_name);
 
-/* --- Utility Functions --- */
-struct nl_msg *set_req(struct nl_context *ctx, const int fam_id, const int cmd);
-struct nl_msg *set_res(struct nl_context *ctx);
-void parse_nl_util_response(struct nlattr *nl_na, int rem);
-
 /* --- Core Functionality --- */
 void handle_l2_list(struct nl_context *ctx);
 void handle_l2_by_ifindex(struct nl_context *ctx, const int ifindex);
+
+/* --- Utility Functions --- */
+struct nl_msg *set_req(struct nl_context *ctx, const int fam_id, const int cmd);
+struct nl_msg *set_res(struct nl_context *ctx);

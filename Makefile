@@ -56,7 +56,7 @@ user-build:
 	@tput setaf 1
 	@echo "    user-build"
 	@tput sgr0
-	gcc user/nl_user.c -o nl_user.out -I$(COMMON_INCLUDE)
+	gcc -Wall -Werror user/nl_user.c user/nl_parse.c -o nl_user.out -I$(COMMON_INCLUDE)
 
 user-clean:
 	@tput setaf 1
