@@ -20,8 +20,10 @@ enum NL_UTIL_NESTED_ATTRS {
 	NL_UTIL_NESTED_A_UNSPEC, /* Unspecified nested attribute (placeholder) */
 	NL_UTIL_NESTED_A_IFINDEX, /* Interface index (e.g., 2 for eth0) */
 	NL_UTIL_NESTED_A_IFNAME, /* Interface name (e.g., "eth0") */
+	NL_UTIL_NESTED_A_FLAGS, /* Interface flags (e.g., up/down) */
 	NL_UTIL_NESTED_A_IFMTU, /* Interface MTU (maximum transmission unit) */
 	NL_UTIL_NESTED_A_STATE, /* Interface operational state (e.g., up/down) */
+	NL_UTIL_NESTED_A_IFBRD, /* Interface broadcast address */
 	NL_UTIL_NESTED_A_IFMAC, /* Interface MAC address */
 	__NL_UTIL_NESTED_A_MAX /* Internal max value for validation */
 };

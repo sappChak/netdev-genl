@@ -18,6 +18,8 @@ MODULE_DESCRIPTION(
 int l2_list_doit(struct sk_buff *sender_buff, struct genl_info *info);
 int l2_iid_doit(struct sk_buff *sender_buff, struct genl_info *info);
 int nlmsg_err_doit(struct sk_buff *sender_buff, struct genl_info *info);
+int put_nested_basic(struct sk_buff *reply_buff, struct net_device *netdev);
+int put_nested_detailed(struct sk_buff *reply_buff, struct net_device *netdev);
 
 /* Nested attribute policy for network device attributes */
 struct nla_policy nl_util_nested_policy[NL_UTIL_NESTED_A_MAX + 1] = {
@@ -130,16 +132,10 @@ int l2_list_doit(struct sk_buff *sender_buff, struct genl_info *info)
 			}
 
 			/* Add interface attributes */
-			if (nla_put_uint(reply_buff, NL_UTIL_NESTED_A_IFINDEX,
-					 netdev->ifindex) ||
-			    nla_put_string(reply_buff, NL_UTIL_NESTED_A_IFNAME,
-					   netdev->name) ||
-			    nla_put_uint(reply_buff, NL_UTIL_NESTED_A_IFMTU,
-					 netdev->mtu) ||
-			    nla_put(reply_buff, NL_UTIL_NESTED_A_IFMAC,
-				    ETH_ALEN, netdev->dev_addr)) {
+			if (put_nested_basic(reply_buff, netdev)) {
 				pr_err("Failed to add nested attributes\n");
 				nla_nest_cancel(reply_buff, start);
+				netdev_put(netdev, 0);
 				nlmsg_free(reply_buff);
 				return -ENOMEM;
 			}
@@ -229,12 +225,7 @@ int l2_iid_doit(struct sk_buff *sender_buff, struct genl_info *info)
 	}
 
 	/* Add interface attributes */
-	if (nla_put_uint(reply_buff, NL_UTIL_NESTED_A_IFINDEX,
-			 netdev->ifindex) ||
-	    nla_put_string(reply_buff, NL_UTIL_NESTED_A_IFNAME, netdev->name) ||
-	    nla_put_uint(reply_buff, NL_UTIL_NESTED_A_IFMTU, netdev->mtu) ||
-	    nla_put(reply_buff, NL_UTIL_NESTED_A_IFMAC, ETH_ALEN,
-		    netdev->dev_addr)) {
+	if (put_nested_basic(reply_buff, netdev)) {
 		pr_err("Failed to add nested attributes\n");
 		nla_nest_cancel(reply_buff, start);
 		netdev_put(netdev, 0);
@@ -268,6 +259,36 @@ int nlmsg_err_doit(struct sk_buff *sender_buff, struct genl_info *info)
 	pr_info("Callback %s() invoked, sending NLMSG_ERR response\n",
 		__func__);
 	return -EINVAL;
+}
+
+/** 
+ * put_nested_basic - Helper function to add basic network device attributes
+ * @reply_buff: Pointer to the reply buffer
+ * @netdev: Pointer to the network device structure
+ *
+ * Returns: 0 on success, negative error code on failure
+ */
+int put_nested_basic(struct sk_buff *reply_buff, struct net_device *netdev)
+{
+	char *state;
+	if (netdev->type == ARPHRD_ETHER) {
+		state = netif_oper_up(netdev) ? "UP" : "DOWN";
+	} else {
+		state = "UNKNOWN";
+	}
+	if (nla_put_u32(reply_buff, NL_UTIL_NESTED_A_IFINDEX,
+			netdev->ifindex) ||
+	    nla_put_string(reply_buff, NL_UTIL_NESTED_A_IFNAME, netdev->name) ||
+	    nla_put_u32(reply_buff, NL_UTIL_NESTED_A_FLAGS, netdev->flags) ||
+	    nla_put_uint(reply_buff, NL_UTIL_NESTED_A_IFMTU, netdev->mtu) ||
+	    nla_put_string(reply_buff, NL_UTIL_NESTED_A_STATE, state) ||
+	    nla_put(reply_buff, NL_UTIL_NESTED_A_IFMAC, ETH_ALEN,
+		    netdev->dev_addr) ||
+	    nla_put(reply_buff, NL_UTIL_NESTED_A_IFBRD, MAX_ADDR_LEN,
+		    netdev->broadcast)) {
+		return -1;
+	}
+	return 0;
 }
 
 /**
