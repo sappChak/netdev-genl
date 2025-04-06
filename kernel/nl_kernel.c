@@ -225,7 +225,7 @@ int l2_iid_doit(struct sk_buff *sender_buff, struct genl_info *info)
 	}
 
 	/* Add interface attributes */
-	if (put_nested_basic(reply_buff, netdev)) {
+	if (put_nested_detailed(reply_buff, netdev)) {
 		pr_err("Failed to add nested attributes\n");
 		nla_nest_cancel(reply_buff, start);
 		netdev_put(netdev, 0);
@@ -235,6 +235,8 @@ int l2_iid_doit(struct sk_buff *sender_buff, struct genl_info *info)
 
 	nla_nest_end(reply_buff, start);
 	netdev_put(netdev, 0);
+
+	/* Finalize the message*/
 	genlmsg_end(reply_buff, msg_hdr);
 
 	/* Send the response */
@@ -270,24 +272,39 @@ int nlmsg_err_doit(struct sk_buff *sender_buff, struct genl_info *info)
  */
 int put_nested_basic(struct sk_buff *reply_buff, struct net_device *netdev)
 {
-	char *state;
-	if (netdev->type == ARPHRD_ETHER) {
-		state = netif_oper_up(netdev) ? "UP" : "DOWN";
-	} else {
-		state = "UNKNOWN";
-	}
 	if (nla_put_u32(reply_buff, NL_UTIL_NESTED_A_IFINDEX,
 			netdev->ifindex) ||
 	    nla_put_string(reply_buff, NL_UTIL_NESTED_A_IFNAME, netdev->name) ||
 	    nla_put_u32(reply_buff, NL_UTIL_NESTED_A_FLAGS, netdev->flags) ||
 	    nla_put_uint(reply_buff, NL_UTIL_NESTED_A_IFMTU, netdev->mtu) ||
-	    nla_put_string(reply_buff, NL_UTIL_NESTED_A_STATE, state) ||
+	    nla_put_u32(reply_buff, NL_UTIL_NESTED_A_QLEN,
+			netdev->tx_queue_len) ||
+	    nla_put_u32(reply_buff, NL_UTIL_NESTED_A_STATE,
+			netdev->operstate) ||
 	    nla_put(reply_buff, NL_UTIL_NESTED_A_IFMAC, ETH_ALEN,
 		    netdev->dev_addr) ||
 	    nla_put(reply_buff, NL_UTIL_NESTED_A_IFBRD, MAX_ADDR_LEN,
 		    netdev->broadcast)) {
 		return -1;
 	}
+	return 0;
+}
+
+int put_nested_detailed(struct sk_buff *reply_buff, struct net_device *netdev)
+{
+	struct rtnl_link_stats64 stats;
+
+	if (put_nested_basic(reply_buff, netdev)) {
+		return -1;
+	}
+
+	dev_get_stats(netdev, &stats);
+
+	// Package the gift
+	nla_put(reply_buff, NL_UTIL_NESTED_A_STATS,
+		sizeof(struct rtnl_link_stats64),
+		(struct rtnl_link_stats64 *)&stats);
+
 	return 0;
 }
 

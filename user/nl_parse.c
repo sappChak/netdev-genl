@@ -1,106 +1,124 @@
 #include "nl_parse.h"
-#include <linux/if.h>
-#include <stdio.h>
-#include <stdint.h>
 #include "nl_user.h"
 #include "netlink_common.h"
+#include <linux/if_link.h>
+#include <stdio.h>
+#include <string.h>
 
-// impl Display for netdev_flag {}
-static const netdev_flag flag_list[] = { { IFF_UP, "UP" },
-					 { IFF_BROADCAST, "BROADCAST" },
-					 { IFF_DEBUG, "DEBUG" },
-					 { IFF_LOOPBACK, "LOOPBACK" },
-					 { IFF_POINTOPOINT, "POINTOPOINT" },
-					 { IFF_NOARP, "NOARP" },
-					 { IFF_PROMISC, "PROMISC" },
-					 { IFF_MULTICAST, "MULTICAST" },
-					 { IFF_ALLMULTI, "ALLMULTI" },
-					 { IFF_MASTER, "MASTER" },
-					 { IFF_SLAVE, "SLAVE" },
-					 { IFF_PORTSEL, "PORTSEL" },
-					 { IFF_AUTOMEDIA, "AUTOMEDIA" },
-					 { IFF_DYNAMIC, "DYNAMIC" },
-					 { IFF_RUNNING, "RUNNING" },
-					 { IFF_NOTRAILERS, "NOTRAILERS" },
-					 { 0, NULL } };
+/* List of known network interface flags and their string representations. */
+static const netdev_flag flag_list[] = {
+	{ IFF_UP, "UP" },
+	{ IFF_BROADCAST, "BROADCAST" },
+	{ IFF_DEBUG, "DEBUG" },
+	{ IFF_LOOPBACK, "LOOPBACK" },
+	{ IFF_POINTOPOINT, "POINTOPOINT" },
+	{ IFF_NOARP, "NOARP" },
+	{ IFF_PROMISC, "PROMISC" },
+	{ IFF_MULTICAST, "MULTICAST" },
+	{ IFF_ALLMULTI, "ALLMULTI" },
+	{ IFF_MASTER, "MASTER" },
+	{ IFF_SLAVE, "SLAVE" },
+	{ IFF_PORTSEL, "PORTSEL" },
+	{ IFF_AUTOMEDIA, "AUTOMEDIA" },
+	{ IFF_DYNAMIC, "DYNAMIC" },
+	{ IFF_RUNNING, "RUNNING" },
+	{ IFF_NOTRAILERS, "NOTRAILERS" },
+	{ 0, NULL } /* Sentinel value */
+};
 
 /**
- * parse_netdev_flags - Parse and display network device flags
- * @flags: Flags to parse
+ * print_netdev_flags - Prints network interface flags.
+ * @flags: Bitmask of interface flags (e.g., IFF_UP, IFF_BROADCAST).
  *
- * This function takes a set of flags and prints their names in a human-readable
- * format. The flags are defined in the netdev_flag structure.
+ * Output is in angle-bracket notation, e.g., <UP,BROADCAST,RUNNING>.
  */
-void parse_netdev_flags(unsigned int flags)
+void print_netdev_flags(unsigned int flags)
 {
 	printf("<");
-	int comma = 0;
-	for (int i = 0; flag_list[i].flag != 0; i++) {
+	const char *sep = "";
+	for (int i = 0; flag_list[i].flag; i++) {
 		if (flags & flag_list[i].flag) {
-			if (comma) {
-				printf(",");
-			}
-			printf("%s", flag_list[i].name);
-			comma = 1;
+			printf("%s%s", sep, flag_list[i].name);
+			sep = ",";
 		}
 	}
 	printf(">");
 }
 
 /**
- * parse_nl_util_response - Parse and display netlink response attributes for network devices
- * @nl_na: Pointer to the netlink attribute to parse (must not be NULL)
- * @rem: Remaining bytes in the message 
- * Returns: 0 on success, negative value on error
+ * print_netdev_operstate - Prints network device operational state.
+ * @operstate: Operational state value (e.g., IF_OPER_UP).
+ *
+ * Only common states are mapped to string names. Others default to UNKNOWN.
  */
-int parse_nl_util_response(struct nlattr *nl_na, size_t rem)
+void print_netdev_operstate(unsigned int operstate)
 {
-	if (!nl_na) {
+	printf(" state ");
+	const char *states[] = { "UNKNOWN", "UP", "DOWN", "DORMANT" };
+	printf("%s",
+	       (operstate <= IF_OPER_DORMANT) ? states[operstate] : "UNKNOWN");
+}
+
+/**
+ * parse_into_netdev - Parses netlink attributes into an array of netdev structs.
+ * @dev: Pointer to an array of struct netdev to be filled.
+ * @nl_na: Pointer to the first netlink attribute.
+ * @rem: Remaining length of attributes to process.
+ *
+ * Returns: number of parsed devices on success, -1 on error.
+ */
+int parse_into_netdev(struct netdev *dev, struct nlattr *nl_na, size_t rem)
+{
+	if (!nl_na || !dev) {
+		LOG_ERROR("Null pointer input");
 		return -1;
 	}
-	while (rem >= sizeof(*nl_na)) {
+	int dev_count = 0;
+	while (rem >= sizeof(*nl_na) && dev_count <= MAX_NETDEV_SIZE) {
 		if (nl_na->nla_type == NL_UTIL_A_NETDEV) {
-			struct nlattr *pos = (struct nlattr *)NLA_DATA(nl_na);
+			dev_count++;
+			struct nlattr *pos = NLA_DATA(nl_na);
 			int rem_nest = NLMSG_ALIGN(nl_na->nla_len) - NLA_HDRLEN;
 
 			while (rem_nest >= sizeof(*pos)) {
-				uint8_t *mac, *brd;
+				void *data = NLA_DATA(pos);
 				switch (pos->nla_type) {
 				case NL_UTIL_NESTED_A_IFINDEX:
-					printf("%d:",
-					       *(uint32_t *)NLA_DATA(pos));
+					dev->ifindex = *(uint32_t *)data;
 					break;
 				case NL_UTIL_NESTED_A_IFNAME:
-					printf(" %s:", (char *)NLA_DATA(pos));
+					strncpy(dev->ifname, data,
+						IFNAMSIZ - 1);
 					break;
 				case NL_UTIL_NESTED_A_IFMTU:
-					printf(" mtu %d",
-					       *(uint32_t *)NLA_DATA(pos));
+					dev->mtu = *(uint32_t *)data;
 					break;
 				case NL_UTIL_NESTED_A_FLAGS:
-					parse_netdev_flags(
-						*(uint32_t *)NLA_DATA(pos));
+					dev->flags = *(uint32_t *)data;
 					break;
 				case NL_UTIL_NESTED_A_STATE:
-					printf(" state %s\n",
-					       (char *)NLA_DATA(pos));
+					dev->operstate = *(uint32_t *)data;
+					break;
+				case NL_UTIL_NESTED_A_QLEN:
+					dev->qlen = *(uint32_t *)data;
+					dev->initialized_fields |=
+						NETDEV_QLEN_SET;
 					break;
 				case NL_UTIL_NESTED_A_IFMAC:
-					mac = (uint8_t *)NLA_DATA(pos);
-					printf("    link/ether %02x:%02x:%02x:%02x:%02x:%02x",
-					       mac[0], mac[1], mac[2], mac[3],
-					       mac[4], mac[5]);
+					memcpy(dev->ifmac, data, ETH_ALEN);
 					break;
 				case NL_UTIL_NESTED_A_IFBRD:
-					brd = (uint8_t *)NLA_DATA(pos);
-					printf(" brd: %02x:%02x:%02x:%02x:%02x:%02x\n",
-					       brd[0], brd[1], brd[2], brd[3],
-					       brd[4], brd[5]);
+					memcpy(dev->ifbrd, data, MAX_ADDR_LEN);
+					break;
+				case NL_UTIL_NESTED_A_STATS:
+					memcpy(&dev->stats, data,
+					       sizeof(struct rtnl_link_stats64));
+					dev->initialized_fields |=
+						NETDEV_STATS_SET;
 					break;
 				default:
-					LOG_ERROR(
-						"Unknown attribute type: %d\n",
-						pos->nla_type);
+					LOG_ERROR("Unknown attr: %d",
+						  pos->nla_type);
 				}
 				rem_nest -= NLA_ALIGN(pos->nla_len);
 				pos = (struct nlattr *)((char *)pos +
@@ -111,7 +129,41 @@ int parse_nl_util_response(struct nlattr *nl_na, size_t rem)
 		rem -= NLA_ALIGN(nl_na->nla_len);
 		nl_na = (struct nlattr *)((char *)nl_na +
 					  NLA_ALIGN(nl_na->nla_len));
+		dev++;
 	}
+	return dev_count;
+}
 
+/**
+ * print_netdevs - Prints formatted information for each network device.
+ * @netdev: Pointer to array of struct netdev.
+ * @n: Number of devices in the array.
+ *
+ * Returns: 0 on success.
+ */
+int print_netdevs(struct netdev *netdev, int n)
+{
+	for (int i = 0; i < n; i++) {
+		struct netdev *d = &netdev[i];
+		printf("%d: %s: ", d->ifindex, d->ifname);
+		print_netdev_flags(d->flags);
+		printf(" mtu %d", d->mtu);
+		print_netdev_operstate(d->operstate);
+		if (d->initialized_fields & NETDEV_QLEN_SET)
+			printf(" qlen %d", d->qlen);
+		printf("\n    link/ether %02x:%02x:%02x:%02x:%02x:%02x brd %02x:%02x:%02x:%02x:%02x:%02x\n",
+		       d->ifmac[0], d->ifmac[1], d->ifmac[2], d->ifmac[3],
+		       d->ifmac[4], d->ifmac[5], d->ifbrd[0], d->ifbrd[1],
+		       d->ifbrd[2], d->ifbrd[3], d->ifbrd[4], d->ifbrd[5]);
+		if (d->initialized_fields & NETDEV_STATS_SET) {
+			printf("rx packets %llu\n", d->stats.rx_packets);
+			printf("rx errors %llu\n", d->stats.rx_errors);
+			printf("rx bytes %llu\n", d->stats.rx_bytes);
+
+			printf("tx packets %llu\n", d->stats.tx_packets);
+			printf("tx errors %llu\n", d->stats.tx_errors);
+			printf("tx bytes %llu\n", d->stats.tx_bytes);
+		}
+	}
 	return 0;
 }
