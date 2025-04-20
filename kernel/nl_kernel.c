@@ -24,14 +24,10 @@ int put_nested_detailed(struct sk_buff *reply_buff, struct net_device *netdev);
 /* Nested attribute policy for network device attributes */
 struct nla_policy nl_util_nested_policy[NL_UTIL_NESTED_A_MAX + 1] = {
 	[NL_UTIL_NESTED_A_IFINDEX] = { .type = NLA_U32 }, /* Interface index */
-	[NL_UTIL_NESTED_A_IFNAME] = { .type = NLA_STRING }, /* Interface name */
-	[NL_UTIL_NESTED_A_IFMTU] = { .type = NLA_U32 }, /* Interface MTU */
-	[NL_UTIL_NESTED_A_IFMAC] = { .type = NLA_STRING }, /* MAC address */
 };
 
 /* Top-level attribute policy */
 struct nla_policy nl_util_genl_policy[NL_UTIL_A_MAX + 1] = {
-	[NL_UTIL_A_UNSPEC] = { .type = NLA_UNSPEC }, /* Unspecified attribute */
 	[NL_UTIL_A_NETDEV] = NLA_POLICY_NESTED(
 		nl_util_nested_policy), /* Nested network device attributes */
 };
@@ -120,14 +116,16 @@ int l2_list_doit(struct sk_buff *sender_buff, struct genl_info *info)
 	}
 
 	/* Iterate through network devices */
-	for_each_netdev(&init_net, netdev) {
-		pr_debug("Found device: [%s]\n", netdev->name);
+	rcu_read_lock();
+	for_each_netdev_rcu(&init_net, netdev) {
+		pr_debug("Found a device: [%s]\n", netdev->name);
 		if (netdev->type == ARPHRD_ETHER) {
 			struct nlattr *start = nla_nest_start_noflag(
 				reply_buff, NL_UTIL_A_NETDEV);
 			if (!start) {
 				pr_err("Failed to start nested attribute\n");
 				nlmsg_free(reply_buff);
+				rcu_read_unlock();
 				return -ENOMEM;
 			}
 
@@ -135,15 +133,17 @@ int l2_list_doit(struct sk_buff *sender_buff, struct genl_info *info)
 			if (put_nested_basic(reply_buff, netdev)) {
 				pr_err("Failed to add nested attributes\n");
 				nla_nest_cancel(reply_buff, start);
-				netdev_put(netdev, 0);
 				nlmsg_free(reply_buff);
+				rcu_read_unlock();
 				return -ENOMEM;
 			}
 
 			nla_nest_end(reply_buff, start);
 		}
 	}
+	rcu_read_unlock();
 
+	/* Finalize the message */
 	genlmsg_end(reply_buff, msg_hdr);
 
 	/* Send the response */
@@ -198,7 +198,7 @@ int l2_iid_doit(struct sk_buff *sender_buff, struct genl_info *info)
 
 	/* Extract interface index from payload */
 	na_nested = (struct nlattr *)nla_data(na);
-	ifindex = nla_get_uint(na_nested);
+	ifindex = nla_get_u32(na_nested);
 	if (!ifindex) {
 		pr_err("Failed to obtain interface index from payload\n");
 		nlmsg_free(reply_buff);
@@ -206,10 +206,12 @@ int l2_iid_doit(struct sk_buff *sender_buff, struct genl_info *info)
 	}
 
 	/* Get network device by index */
-	netdev = netdev_get_by_index(&init_net, ifindex, 0, 0);
+	rcu_read_lock();
+	netdev = dev_get_by_index_rcu(&init_net, ifindex);
 	if (!netdev) {
 		pr_err("Failed to obtain network device for index %d\n",
 		       ifindex);
+		rcu_read_unlock();
 		nlmsg_free(reply_buff);
 		return -ENODEV;
 	}
@@ -219,7 +221,7 @@ int l2_iid_doit(struct sk_buff *sender_buff, struct genl_info *info)
 		nla_nest_start_noflag(reply_buff, NL_UTIL_A_NETDEV);
 	if (!start) {
 		pr_err("Failed to start nested attribute\n");
-		netdev_put(netdev, 0);
+		rcu_read_unlock();
 		nlmsg_free(reply_buff);
 		return -ENOMEM;
 	}
@@ -228,15 +230,15 @@ int l2_iid_doit(struct sk_buff *sender_buff, struct genl_info *info)
 	if (put_nested_detailed(reply_buff, netdev)) {
 		pr_err("Failed to add nested attributes\n");
 		nla_nest_cancel(reply_buff, start);
-		netdev_put(netdev, 0);
+		rcu_read_unlock();
 		nlmsg_free(reply_buff);
 		return -ENOMEM;
 	}
 
 	nla_nest_end(reply_buff, start);
-	netdev_put(netdev, 0);
+	rcu_read_unlock();
 
-	/* Finalize the message*/
+	/* Finalize the message */
 	genlmsg_end(reply_buff, msg_hdr);
 
 	/* Send the response */
@@ -276,14 +278,14 @@ int put_nested_basic(struct sk_buff *reply_buff, struct net_device *netdev)
 			netdev->ifindex) ||
 	    nla_put_string(reply_buff, NL_UTIL_NESTED_A_IFNAME, netdev->name) ||
 	    nla_put_u32(reply_buff, NL_UTIL_NESTED_A_FLAGS, netdev->flags) ||
-	    nla_put_uint(reply_buff, NL_UTIL_NESTED_A_IFMTU, netdev->mtu) ||
+	    nla_put_u32(reply_buff, NL_UTIL_NESTED_A_IFMTU, netdev->mtu) ||
 	    nla_put_u32(reply_buff, NL_UTIL_NESTED_A_QLEN,
 			netdev->tx_queue_len) ||
 	    nla_put_u32(reply_buff, NL_UTIL_NESTED_A_STATE,
 			netdev->operstate) ||
 	    nla_put(reply_buff, NL_UTIL_NESTED_A_IFMAC, ETH_ALEN,
 		    netdev->dev_addr) ||
-	    nla_put(reply_buff, NL_UTIL_NESTED_A_IFBRD, MAX_ADDR_LEN,
+	    nla_put(reply_buff, NL_UTIL_NESTED_A_IFBRD, ETH_ALEN,
 		    netdev->broadcast)) {
 		return -1;
 	}
@@ -293,18 +295,14 @@ int put_nested_basic(struct sk_buff *reply_buff, struct net_device *netdev)
 int put_nested_detailed(struct sk_buff *reply_buff, struct net_device *netdev)
 {
 	struct rtnl_link_stats64 stats;
-
 	if (put_nested_basic(reply_buff, netdev)) {
 		return -1;
 	}
-
 	dev_get_stats(netdev, &stats);
-
-	// Package the gift
-	nla_put(reply_buff, NL_UTIL_NESTED_A_STATS,
-		sizeof(struct rtnl_link_stats64),
-		(struct rtnl_link_stats64 *)&stats);
-
+	if (nla_put(reply_buff, NL_UTIL_NESTED_A_STATS, sizeof(stats),
+		    &stats)) {
+		return -1;
+	}
 	return 0;
 }
 
