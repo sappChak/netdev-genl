@@ -32,3 +32,14 @@ modules.order
 # ignore directories commonly generated during builds
 user/nl_user.out
 user/*.o
+
+#ignore LaTex compiled files
+*.aux
+*.log
+*.out
+*.toc
+*.gz
+*.idx
+*.fdb_latexmk
+*.fls
+
