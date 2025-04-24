@@ -11,7 +11,7 @@
 #include <stdio.h>
 #include <stdint.h>
 
-#define MAX_NETDEV_SIZE 32
+#define MAX_NETDEV_COUNT 32
 
 typedef struct {
 	unsigned int flag;

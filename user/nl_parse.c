@@ -54,9 +54,11 @@ void print_netdev_flags(unsigned int flags)
 void print_netdev_operstate(unsigned int operstate)
 {
 	printf(" state ");
-	const char *states[] = { "UNKNOWN", "UP", "DOWN", "DORMANT" };
-	printf("%s",
-	       (operstate <= IF_OPER_DORMANT) ? states[operstate] : "UNKNOWN");
+	const char *states[] = { "UNKNOWN", "NOTPRESENT",
+				 "DOWN",    "LOWERLAYERDOWN",
+				 "TESTING", "DORMANT",
+				 "UP" };
+	printf("%s", states[operstate]);
 }
 
 /**
@@ -74,7 +76,7 @@ int parse_into_netdev(struct netdev *dev, struct nlattr *nl_na, size_t rem)
 		return -1;
 	}
 	int dev_count = 0;
-	while (rem >= sizeof(*nl_na) && dev_count <= MAX_NETDEV_SIZE) {
+	while (rem >= sizeof(*nl_na) && dev_count <= MAX_NETDEV_COUNT) {
 		if (nl_na->nla_type == NL_UTIL_A_NETDEV) {
 			dev_count++;
 			struct nlattr *pos = NLA_DATA(nl_na);
@@ -121,14 +123,11 @@ int parse_into_netdev(struct netdev *dev, struct nlattr *nl_na, size_t rem)
 						  pos->nla_type);
 				}
 				rem_nest -= NLA_ALIGN(pos->nla_len);
-				pos = (struct nlattr *)((char *)pos +
-							NLA_ALIGN(
-								pos->nla_len));
+				pos = NLA_NEXT(pos);
 			}
 		}
 		rem -= NLA_ALIGN(nl_na->nla_len);
-		nl_na = (struct nlattr *)((char *)nl_na +
-					  NLA_ALIGN(nl_na->nla_len));
+		nl_na = NLA_NEXT(nl_na);
 		dev++;
 	}
 	return dev_count;
@@ -159,7 +158,6 @@ int print_netdevs(struct netdev *netdev, int n)
 			printf("rx packets %llu\n", d->stats.rx_packets);
 			printf("rx errors %llu\n", d->stats.rx_errors);
 			printf("rx bytes %llu\n", d->stats.rx_bytes);
-
 			printf("tx packets %llu\n", d->stats.tx_packets);
 			printf("tx errors %llu\n", d->stats.tx_errors);
 			printf("tx bytes %llu\n", d->stats.tx_bytes);
