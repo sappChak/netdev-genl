@@ -7,7 +7,7 @@
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Andrii Konotop <konotop401@gmail.com>");
 MODULE_DESCRIPTION(
-	"Kernel module providing network interface information via Generic Netlink sockets to userspace");
+	"Kernel module that provides network interface information via Generic Netlink sockets to userspace");
 
 #ifdef pr_fmt
 #undef pr_fmt
@@ -118,7 +118,7 @@ int l2_list_doit(struct sk_buff *sender_buff, struct genl_info *info)
 	/* Iterate through network devices */
 	rcu_read_lock();
 	for_each_netdev_rcu(&init_net, netdev) {
-		pr_debug("Found a device: [%s]\n", netdev->name);
+		pr_info("Found device with name: [%s]\n", netdev->name);
 		if (netdev->type == ARPHRD_ETHER) {
 			struct nlattr *start = nla_nest_start_noflag(
 				reply_buff, NL_UTIL_A_NETDEV);

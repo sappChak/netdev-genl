@@ -1,10 +1,10 @@
 #pragma once
 
-/* Common definitions for the nl_ip_util Generic Netlink family */
+/* Common definitions for the nl_util Generic Netlink family */
 
-/* Name of the Generic Netlink family for IP utility operations */
+/* Name of the Generic Netlink family for utility operations */
 #ifndef FAMILY_NAME
-#define FAMILY_NAME "nl_ip_util"
+#define FAMILY_NAME "nl_util"
 #endif
 
 /* Top-level attributes for nl_ip_util messages */
@@ -23,7 +23,7 @@ enum NL_UTIL_NESTED_ATTRS {
 	NL_UTIL_NESTED_A_FLAGS, /* Interface flags (e.g., up/down) */
 	NL_UTIL_NESTED_A_IFMTU, /* Interface MTU (maximum transmission unit) */
 	NL_UTIL_NESTED_A_STATE, /* Interface operational state (e.g., up/down) */
-	NL_UTIL_NESTED_A_QLEN, /* Interface TX qeueue length */
+	NL_UTIL_NESTED_A_QLEN, /* Interface TX queue length */
 	NL_UTIL_NESTED_A_STATS, /* Interface statistics (e.g., RX/TX bytes) */
 	NL_UTIL_NESTED_A_IFBRD, /* Interface broadcast address */
 	NL_UTIL_NESTED_A_IFMAC, /* Interface MAC address */
