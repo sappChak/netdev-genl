@@ -48,13 +48,16 @@ struct nl_context {
  */
 int main(int argc, const char *argv[])
 {
+	int rc;
+	struct nl_context *ctx;
+
 	if (argc < 2 || strcmp(argv[1], "show") != 0) {
 		fprintf(stderr, "Usage: %s show [L2_IID]\n", argv[0]);
 		return 1;
 	}
 
 	/* Initialize program context */
-	struct nl_context *ctx = nl_context_init();
+	ctx = nl_context_init();
 	if (!ctx) {
 		return 1;
 	}
@@ -72,31 +75,37 @@ int main(int argc, const char *argv[])
 	}
 
 	/* Handle command line arguments */
-	argc == 2 ? handle_l2_list(ctx) :
-		    handle_l2_by_ifindex(ctx, atoi(argv[2]));
+	rc = (argc == 2) ? handle_l2_list(ctx) :
+			   handle_l2_by_ifindex(ctx, atoi(argv[2]));
+
+	if (rc < 0) {
+		LOG_ERROR("Failed to handle command");
+		nl_context_free(ctx);
+		return rc;
+	}
 
 	nl_context_free(ctx);
 	return 0;
 }
 
 /**
- * nl_context_init - Allocate and initialize context
+ * nl_context_init - Allocate and partially initialize context
  *
  * Return: Pointer to context or NULL on failure
  */
 struct nl_context *nl_context_init(void)
 {
-	struct nl_context *ctx = calloc(1, sizeof(struct nl_context));
+	struct nl_context *ctx = malloc(sizeof(struct nl_context));
 	if (!ctx) {
-		perror("Failed to allocate context");
+		LOG_ERROR("Failed to allocate context");
 		return NULL;
 	}
 	ctx->fam_id = -1;
 	ctx->fd = -1;
-	ctx->req = calloc(1, sizeof(struct nl_msg));
-	ctx->res = calloc(1, sizeof(struct nl_msg));
+	ctx->req = malloc(sizeof(struct nl_msg));
+	ctx->res = malloc(sizeof(struct nl_msg));
 	if (!ctx->req || !ctx->res) {
-		perror("Failed to allocate message buffers");
+		LOG_ERROR("Failed to allocate message buffers");
 		free(ctx->req);
 		free(ctx->res);
 		free(ctx);
@@ -123,16 +132,14 @@ void nl_context_free(struct nl_context *ctx)
 }
 
 /**
- * nl_context_free - Free netlink context resources
- * @ctx: Context to free
+ * set_nl_addr - Set up Netlink address structure
+ * @ctx: Netlink context
  */
-void set_nl_addr(struct nl_context *ctx)
+void set_nl_addr(struct nl_context *ctx, int pid)
 {
 	memset(&ctx->nl_address, 0, sizeof(struct sockaddr_nl));
 	ctx->nl_address.nl_family = AF_NETLINK;
-	ctx->nl_address.nl_groups = 0; /* No multicast groups */
-	ctx->nl_address.nl_pid = 0; /* Kernel PID */
-	ctx->nl_address.nl_pad = 0;
+	ctx->nl_address.nl_pid = pid;
 }
 
 /**
@@ -150,9 +157,10 @@ int open_and_bind(struct nl_context *ctx)
 		return -1;
 	}
 
+	/* Set up address for communication */
+	set_nl_addr(ctx, getpid());
+
 	/* Bind socket to address */
-	memset(&ctx->nl_address, 0, sizeof(struct sockaddr_nl));
-	ctx->nl_address.nl_family = AF_NETLINK;
 	if (bind(ctx->fd, (struct sockaddr *)&ctx->nl_address,
 		 sizeof(struct sockaddr_nl)) < 0) {
 		LOG_ERROR("Failed to bind socket");
@@ -185,7 +193,7 @@ int resolve_family_id_by_name(struct nl_context *ctx, const char *fam_name)
 	req->n.nlmsg_len += NLMSG_ALIGN(na->nla_len);
 
 	/* Send request */
-	set_nl_addr(ctx);
+	set_nl_addr(ctx, 0);
 	rxtx_len = sendto(ctx->fd, (char *)req, req->n.nlmsg_len, 0,
 			  (struct sockaddr *)&ctx->nl_address,
 			  sizeof(struct sockaddr_nl));
@@ -204,19 +212,19 @@ int resolve_family_id_by_name(struct nl_context *ctx, const char *fam_name)
 
 	/* Validate response */
 	if (!NLMSG_OK((&res->n), rxtx_len)) {
-		LOG_ERROR("Invalid response length for family ID request\n");
+		LOG_ERROR("Invalid response length for family ID request");
 		return -1;
 	}
 	if (res->n.nlmsg_type == NLMSG_ERROR) {
 		struct nlmsgerr *err = NLMSG_DATA(&res->n);
-		LOG_ERROR("Error code: %d: %s\n", -err->error,
+		LOG_ERROR("Error code: %d: %s", -err->error,
 			  strerror(-err->error));
 		return -1;
 	}
 
 	/* Parse family ID from response */
 	na = (struct nlattr *)GENLMSG_DATA(res);
-	na = (struct nlattr *)((char *)na + NLA_ALIGN(na->nla_len));
+	na = NLA_NEXT(na);
 	if (na->nla_type == CTRL_ATTR_FAMILY_ID) {
 		ctx->fam_id = *(__u16 *)NLA_DATA(na);
 	}
@@ -261,7 +269,7 @@ struct nl_msg *set_res(struct nl_context *ctx)
  * handle_l2_list - Query and display all L2 interfaces
  * @ctx: Netlink context
  */
-void handle_l2_list(struct nl_context *ctx)
+int handle_l2_list(struct nl_context *ctx)
 {
 	int rxtx_len, dev_count;
 	size_t rem;
@@ -271,50 +279,49 @@ void handle_l2_list(struct nl_context *ctx)
 
 	/* Prepare and send request */
 	req = set_req(ctx, ctx->fam_id, NL_UTIL_C_L2_LIST);
-	set_nl_addr(ctx);
+
+	set_nl_addr(ctx, 0);
 	rxtx_len = sendto(ctx->fd, (char *)req, req->n.nlmsg_len, 0,
 			  (struct sockaddr *)&ctx->nl_address,
 			  sizeof(struct sockaddr_nl));
 	if (rxtx_len != req->n.nlmsg_len) {
-		LOG_ERROR("Failed to send L2 list request\n");
-		return;
+		LOG_ERROR("Failed to send L2 list request");
+		return -1;
 	}
 
 	/* Receive response */
 	res = set_res(ctx);
 	rxtx_len = recv(ctx->fd, (char *)res, sizeof(*res), 0);
 	if (rxtx_len < 0) {
-		perror("Failed to receive L2 list response");
-		return;
+		LOG_ERROR("Failed to receive L2 list response");
+		return -1;
 	}
 
 	/* Validate response */
 	if (!NLMSG_OK((&res->n), rxtx_len)) {
-		LOG_ERROR("Invalid L2 list response length\n");
-		return;
-	}
-	if (res->n.nlmsg_type == NLMSG_ERROR) {
-		LOG_ERROR("Received error in L2 list response\n");
-		return;
+		LOG_ERROR("Invalid L2 list response length");
+		return -1;
 	}
 	if (res->n.nlmsg_type == NLMSG_ERROR) {
 		struct nlmsgerr *err = NLMSG_DATA(&res->n);
-		LOG_ERROR("L2 list response: Error code: %d: %s\n", -err->error,
+		LOG_ERROR("L2 list response: Error code: %d: %s", -err->error,
 			  strerror(-err->error));
-		return;
+		return -1;
 	}
 
 	/* Parse response */
 	na = (struct nlattr *)GENLMSG_DATA(res);
 	rem = GENLMSG_PAYLOAD(&res->n);
-	dev = (struct netdev *)malloc(MAX_NETDEV_SIZE * sizeof(struct netdev));
+	dev = (struct netdev *)malloc(MAX_NETDEV_COUNT * sizeof(struct netdev));
 	if ((dev_count = parse_into_netdev(dev, na, rem)) <= 0) {
-		LOG_ERROR("Failed to parse interface query response\n");
+		LOG_ERROR("Failed to parse interface query response");
 		free(dev);
-		return;
+		return -1;
 	}
 	print_netdevs(dev, dev_count);
 	free(dev);
+
+	return 0;
 }
 
 /**
@@ -322,7 +329,7 @@ void handle_l2_list(struct nl_context *ctx)
  * @ctx: Netlink context
  * @ifindex: Interface index to query
  */
-void handle_l2_by_ifindex(struct nl_context *ctx, const int ifindex)
+int handle_l2_by_ifindex(struct nl_context *ctx, const int ifindex)
 {
 	int rxtx_len, dev_count;
 	size_t rem;
@@ -330,9 +337,8 @@ void handle_l2_by_ifindex(struct nl_context *ctx, const int ifindex)
 	struct nl_msg *req, *res;
 	struct netdev *dev;
 
-	/* Prepare request with nested attribute */
+	/* Prepare request payload with nested attribute */
 	req = set_req(ctx, ctx->fam_id, NL_UTIL_C_L2_IID);
-	set_nl_addr(ctx);
 	na = (struct nlattr *)GENLMSG_DATA(req);
 	na->nla_type = NLA_F_NESTED | NL_UTIL_A_NETDEV;
 	na->nla_len = NLA_HDRLEN;
@@ -344,41 +350,46 @@ void handle_l2_by_ifindex(struct nl_context *ctx, const int ifindex)
 	req->n.nlmsg_len += NLMSG_ALIGN(na->nla_len);
 
 	/* Send request */
+	set_nl_addr(ctx, 0);
 	rxtx_len = sendto(ctx->fd, (char *)req, req->n.nlmsg_len, 0,
 			  (struct sockaddr *)&ctx->nl_address,
 			  sizeof(struct sockaddr_nl));
 	if (rxtx_len != req->n.nlmsg_len) {
-		LOG_ERROR("Failed to send interface query request\n");
-		return;
+		LOG_ERROR("Failed to send interface query request");
+		return -1;
 	}
 
 	/* Receive response */
 	res = set_res(ctx);
 	rxtx_len = recv(ctx->fd, (char *)res, sizeof(*res), 0);
 	if (rxtx_len < 0) {
-		LOG_ERROR("Failed to receive interface query response\n");
-		return;
+		LOG_ERROR("Failed to receive interface query response");
+		return -1;
 	}
 
 	/* Validate response */
 	if (!NLMSG_OK((&res->n), rxtx_len)) {
-		LOG_ERROR("Invalid interface query response length\n");
-		return;
+		LOG_ERROR("Invalid interface query response length");
+		return -1;
 	}
 	if (res->n.nlmsg_type == NLMSG_ERROR) {
-		LOG_ERROR("Received error in interface query response\n");
-		return;
+		struct nlmsgerr *err = NLMSG_DATA(&res->n);
+		LOG_ERROR("L2 iid response: Error code: %d: %s", -err->error,
+			  strerror(-err->error));
+		return -1;
 	}
 
 	/* Parse response */
 	na = (struct nlattr *)GENLMSG_DATA(res);
 	rem = GENLMSG_PAYLOAD(&res->n);
-	dev = (struct netdev *)malloc(MAX_NETDEV_SIZE * sizeof(struct netdev));
+	dev = (struct netdev *)malloc(sizeof(struct netdev));
 	if ((dev_count = parse_into_netdev(dev, na, rem)) < 0) {
-		LOG_ERROR("Failed to parse interface query response\n");
+		LOG_ERROR("Failed to parse interface query response");
 		free(dev);
-		return;
+		return -1;
 	}
 	print_netdevs(dev, dev_count);
 	free(dev);
+
+	return 0;
 }
