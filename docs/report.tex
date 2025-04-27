@@ -612,11 +612,13 @@ network interfaces. Each interface's information is encapsulated within an
 \section{Conclusion}
 The implemented Generic Netlink family \texttt{'nl\_util'} supports future extensibility,
 allowing additional nested sub-attributes to be added without modifying the top-level
-structure. As a part of improvements to be made, the \texttt{l2\_list\_doit} callback
-function should ideally perform the same task as the underlying callback function of the
-\texttt{ip link show} command does - dumping the information instead of sending it all at once.
-However, it is retained as a doit handler for simplicity. Also, it would be beneficial to
-implement a dissector for the implemented family.
+structure. Additionally, it is strongly recommended to use \texttt{libnl} library in user
+space, instead of handling Generic Netlink messages manually. As a part of improvements to
+be made in kernel space, the \texttt{l2\_list\_doit} callback function should ideally
+perform the same task as the underlying callback function of the \texttt{ip link show}
+command does - dumping the information instead of sending it all at once. However, it is
+retained as a doit handler for simplicity. Also, it would be beneficial to implement a
+dissector for the implemented family.
 
 \section{References}
 \begin{itemize}
