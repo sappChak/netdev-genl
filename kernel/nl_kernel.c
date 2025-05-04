@@ -14,25 +14,20 @@ MODULE_DESCRIPTION(
 #endif
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
-/* Function declarations */
 int l2_list_doit(struct sk_buff *sender_buff, struct genl_info *info);
 int l2_iid_doit(struct sk_buff *sender_buff, struct genl_info *info);
 int nlmsg_err_doit(struct sk_buff *sender_buff, struct genl_info *info);
 int put_nested_basic(struct sk_buff *reply_buff, struct net_device *netdev);
 int put_nested_detailed(struct sk_buff *reply_buff, struct net_device *netdev);
 
-/* Nested attribute policy for network device attributes */
 struct nla_policy nl_util_nested_policy[NL_UTIL_NESTED_A_MAX + 1] = {
-	[NL_UTIL_NESTED_A_IFINDEX] = { .type = NLA_U32 }, /* Interface index */
+	[NL_UTIL_NESTED_A_IFINDEX] = { .type = NLA_U32 },
 };
 
-/* Top-level attribute policy */
 struct nla_policy nl_util_genl_policy[NL_UTIL_A_MAX + 1] = {
-	[NL_UTIL_A_NETDEV] = NLA_POLICY_NESTED(
-		nl_util_nested_policy), /* Nested network device attributes */
+	[NL_UTIL_A_NETDEV] = NLA_POLICY_NESTED(nl_util_nested_policy),
 };
 
-/* Generic Netlink operations definition */
 struct genl_ops nl_util_gnl_ops[NL_UTIL_C_MAX] = {
 	{
 		.cmd = NL_UTIL_C_L2_LIST, /* Command to list L2 interfaces */
@@ -66,7 +61,6 @@ struct genl_ops nl_util_gnl_ops[NL_UTIL_C_MAX] = {
 	}
 };
 
-/* Generic Netlink family definition */
 static struct genl_family nl_util_genl_family = {
 	.id = 0, /* Auto-assigned ID */
 	.hdrsize = 0, /* No custom header */
@@ -79,13 +73,6 @@ static struct genl_family nl_util_genl_family = {
 	.module = THIS_MODULE, /* Owning kernel module */
 };
 
-/**
- * l2_list_doit - Handler for listing all Ethernet interfaces
- * @sender_buff: Source socket buffer
- * @info: Generic Netlink information structure
- *
- * Returns: 0 on success, negative error code on failure
- */
 int l2_list_doit(struct sk_buff *sender_buff, struct genl_info *info)
 {
 	struct net_device *netdev;
@@ -119,7 +106,7 @@ int l2_list_doit(struct sk_buff *sender_buff, struct genl_info *info)
 	rcu_read_lock();
 	for_each_netdev_rcu(&init_net, netdev) {
 		pr_info("Found device with name: [%s]\n", netdev->name);
-		if (netdev->type == ARPHRD_ETHER) {
+		if (netdev->type == ARPHRD_ETHER | ARPHRD_LOOPBACK) {
 			struct nlattr *start = nla_nest_start_noflag(
 				reply_buff, NL_UTIL_A_NETDEV);
 			if (!start) {
@@ -128,7 +115,6 @@ int l2_list_doit(struct sk_buff *sender_buff, struct genl_info *info)
 				rcu_read_unlock();
 				return -ENOMEM;
 			}
-
 			/* Add interface attributes */
 			if (put_nested_basic(reply_buff, netdev)) {
 				pr_err("Failed to add nested attributes\n");
@@ -137,7 +123,6 @@ int l2_list_doit(struct sk_buff *sender_buff, struct genl_info *info)
 				rcu_read_unlock();
 				return -ENOMEM;
 			}
-
 			nla_nest_end(reply_buff, start);
 		}
 	}
@@ -156,13 +141,6 @@ int l2_list_doit(struct sk_buff *sender_buff, struct genl_info *info)
 	return 0;
 }
 
-/**
- * l2_iid_doit - Handler for retrieving interface by index
- * @sender_buff: Source socket buffer
- * @info: Generic Netlink information structure
- *
- * Returns: 0 on success, negative error code on failure
- */
 int l2_iid_doit(struct sk_buff *sender_buff, struct genl_info *info)
 {
 	struct net_device *netdev;
@@ -251,13 +229,6 @@ int l2_iid_doit(struct sk_buff *sender_buff, struct genl_info *info)
 	return 0;
 }
 
-/**
- * nlmsg_err_doit - Handler for returning an error response
- * @sender_buff: Source socket buffer
- * @info: Generic Netlink information structure
- *
- * Returns: -EINVAL to trigger an error response
- */
 int nlmsg_err_doit(struct sk_buff *sender_buff, struct genl_info *info)
 {
 	pr_info("Callback %s() invoked, sending NLMSG_ERR response\n",
@@ -265,13 +236,6 @@ int nlmsg_err_doit(struct sk_buff *sender_buff, struct genl_info *info)
 	return -EINVAL;
 }
 
-/** 
- * put_nested_basic - Helper function to add basic network device attributes
- * @reply_buff: Pointer to the reply buffer
- * @netdev: Pointer to the network device structure
- *
- * Returns: 0 on success, negative error code on failure
- */
 int put_nested_basic(struct sk_buff *reply_buff, struct net_device *netdev)
 {
 	if (nla_put_u32(reply_buff, NL_UTIL_NESTED_A_IFINDEX,
@@ -306,17 +270,11 @@ int put_nested_detailed(struct sk_buff *reply_buff, struct net_device *netdev)
 	return 0;
 }
 
-/**
- * netlink_mod_init - Module initialization function
- *
- * Returns: 0 on success, negative error code on failure
- */
 static int __init netlink_mod_init(void)
 {
 	int rc;
 	pr_info("Initializing module\n");
 
-	/* Register Generic Netlink family */
 	rc = genl_register_family(&nl_util_genl_family);
 	if (rc) {
 		pr_err("Failed to register family: %d\n", rc);
@@ -327,15 +285,11 @@ static int __init netlink_mod_init(void)
 	return 0;
 }
 
-/**
- * netlink_mod_exit - Module cleanup function
- */
 static void __exit netlink_mod_exit(void)
 {
 	int rc;
 	pr_info("Unloading module\n");
 
-	/* Unregister Generic Netlink family */
 	rc = genl_unregister_family(&nl_util_genl_family);
 	if (rc) {
 		pr_err("Failed to unregister family: %d\n", rc);

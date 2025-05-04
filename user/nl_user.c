@@ -9,26 +9,12 @@
 #include "netlink_common.h"
 #include "nl_parse.h"
 
-/**
- * struct nl_msg - Represents a Netlink message
- * @n: Netlink message header
- * @g: Generic Netlink message header
- * @buf: Payload and attribute buffer
- */
 struct nl_msg {
 	struct nlmsghdr n;
 	struct genlmsghdr g;
 	char buf[NL_MSG_BUF_SIZE];
 };
 
-/**
- * struct nl_context - Holds Netlink communication state
- * @fd: Socket file descriptor
- * @fam_id: Generic Netlink family ID
- * @nl_address: Address for Netlink socket
- * @req: Outgoing message buffer
- * @res: Incoming message buffer
- */
 struct nl_context {
 	int fd;
 	int fam_id;
@@ -37,15 +23,6 @@ struct nl_context {
 	struct nl_msg *res;
 };
 
-/**
- * main - Entry point for Netlink utility
- * @argc: Argument count
- * @argv: Argument vector
- *
- * Usage: <program> show [IFINDEX]
- *
- * Return: 0 on success, non-zero on failure
- */
 int main(int argc, const char *argv[])
 {
 	int rc;
@@ -88,11 +65,6 @@ int main(int argc, const char *argv[])
 	return 0;
 }
 
-/**
- * nl_context_init - Allocate and partially initialize context
- *
- * Return: Pointer to context or NULL on failure
- */
 struct nl_context *nl_context_init(void)
 {
 	struct nl_context *ctx = malloc(sizeof(struct nl_context));
@@ -114,10 +86,6 @@ struct nl_context *nl_context_init(void)
 	return ctx;
 }
 
-/**
- * nl_context_free - Release resources in context
- * @ctx: Pointer to context
- */
 void nl_context_free(struct nl_context *ctx)
 {
 	if (!ctx)
@@ -131,10 +99,6 @@ void nl_context_free(struct nl_context *ctx)
 	free(ctx);
 }
 
-/**
- * set_nl_addr - Set up Netlink address structure
- * @ctx: Netlink context
- */
 void set_nl_addr(struct nl_context *ctx, int pid)
 {
 	memset(&ctx->nl_address, 0, sizeof(struct sockaddr_nl));
@@ -142,12 +106,6 @@ void set_nl_addr(struct nl_context *ctx, int pid)
 	ctx->nl_address.nl_pid = pid;
 }
 
-/**
- * open_and_bind - Create and bind Netlink socket
- * @ctx: Netlink context
- *
- * Return: 0 on success, -1 on failure
- */
 int open_and_bind(struct nl_context *ctx)
 {
 	/* Create netlink socket */
@@ -171,13 +129,6 @@ int open_and_bind(struct nl_context *ctx)
 	return 0;
 }
 
-/**
- * resolve_family_id_by_name - Get family ID for given name
- * @ctx: Netlink context
- * @fam_name: Name of the family
- *
- * Return: 0 on success, -1 on failure
- */
 int resolve_family_id_by_name(struct nl_context *ctx, const char *fam_name)
 {
 	int rxtx_len;
@@ -232,14 +183,6 @@ int resolve_family_id_by_name(struct nl_context *ctx, const char *fam_name)
 	return 0;
 }
 
-/**
- * set_req - Initialize Netlink request message
- * @ctx: Netlink context
- * @fam_id: Family ID
- * @cmd: Command ID
- *
- * Return: Pointer to request message
- */
 struct nl_msg *set_req(struct nl_context *ctx, const int fam_id, const int cmd)
 {
 	memset(ctx->req, 0, sizeof(struct nl_msg));
@@ -253,22 +196,12 @@ struct nl_msg *set_req(struct nl_context *ctx, const int fam_id, const int cmd)
 	return ctx->req;
 }
 
-/**
- * set_res - Prepare response buffer
- * @ctx: Netlink context
- *
- * Return: Pointer to response buffer
- */
 struct nl_msg *set_res(struct nl_context *ctx)
 {
 	memset(ctx->res, 0, sizeof(struct nl_msg));
 	return ctx->res;
 }
 
-/**
- * handle_l2_list - Query and display all L2 interfaces
- * @ctx: Netlink context
- */
 int handle_l2_list(struct nl_context *ctx)
 {
 	int rxtx_len, dev_count;
@@ -324,11 +257,6 @@ int handle_l2_list(struct nl_context *ctx)
 	return 0;
 }
 
-/**
- * handle_l2_by_ifindex - Query interface by index
- * @ctx: Netlink context
- * @ifindex: Interface index to query
- */
 int handle_l2_by_ifindex(struct nl_context *ctx, const int ifindex)
 {
 	int rxtx_len, dev_count;

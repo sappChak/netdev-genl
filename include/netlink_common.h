@@ -1,13 +1,9 @@
 #pragma once
 
-/* Common definitions for the nl_util Generic Netlink family */
-
-/* Name of the Generic Netlink family for utility operations */
 #ifndef FAMILY_NAME
 #define FAMILY_NAME "nl_util"
 #endif
 
-/* Top-level attributes for nl_ip_util messages */
 enum NL_UTIL_ATTRS {
 	NL_UTIL_A_UNSPEC, /* Unspecified attribute (placeholder) */
 	NL_UTIL_A_NETDEV, /* Network device-related attributes */
@@ -15,7 +11,6 @@ enum NL_UTIL_ATTRS {
 };
 #define NL_UTIL_A_MAX (__NL_UTIL_A_MAX - 1)
 
-/* Nested attributes for network device information under NL_UTIL_A_NETDEV */
 enum NL_UTIL_NESTED_ATTRS {
 	NL_UTIL_NESTED_A_UNSPEC, /* Unspecified nested attribute (placeholder) */
 	NL_UTIL_NESTED_A_IFINDEX, /* Interface index (e.g., 2 for eth0) */
@@ -31,7 +26,6 @@ enum NL_UTIL_NESTED_ATTRS {
 };
 #define NL_UTIL_NESTED_A_MAX (__NL_UTIL_NESTED_A_MAX - 1)
 
-/* Commands supported by the nl_ip_util family */
 enum NL_UTIL_CMDS {
 	NL_UTIL_C_UNSPEC, /* Unspecified command (placeholder) */
 	NL_UTIL_C_L2_LIST, /* List all Layer 2 network interfaces */

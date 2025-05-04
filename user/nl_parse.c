@@ -5,33 +5,24 @@
 #include <stdio.h>
 #include <string.h>
 
-/* List of known network interface flags and their string representations. */
-static const netdev_flag flag_list[] = {
-	{ IFF_UP, "UP" },
-	{ IFF_BROADCAST, "BROADCAST" },
-	{ IFF_DEBUG, "DEBUG" },
-	{ IFF_LOOPBACK, "LOOPBACK" },
-	{ IFF_POINTOPOINT, "POINTOPOINT" },
-	{ IFF_NOARP, "NOARP" },
-	{ IFF_PROMISC, "PROMISC" },
-	{ IFF_MULTICAST, "MULTICAST" },
-	{ IFF_ALLMULTI, "ALLMULTI" },
-	{ IFF_MASTER, "MASTER" },
-	{ IFF_SLAVE, "SLAVE" },
-	{ IFF_PORTSEL, "PORTSEL" },
-	{ IFF_AUTOMEDIA, "AUTOMEDIA" },
-	{ IFF_DYNAMIC, "DYNAMIC" },
-	{ IFF_RUNNING, "RUNNING" },
-	{ IFF_NOTRAILERS, "NOTRAILERS" },
-	{ 0, NULL } /* Sentinel value */
-};
+static const netdev_flag flag_list[] = { { IFF_UP, "UP" },
+					 { IFF_BROADCAST, "BROADCAST" },
+					 { IFF_DEBUG, "DEBUG" },
+					 { IFF_LOOPBACK, "LOOPBACK" },
+					 { IFF_POINTOPOINT, "POINTOPOINT" },
+					 { IFF_NOARP, "NOARP" },
+					 { IFF_PROMISC, "PROMISC" },
+					 { IFF_MULTICAST, "MULTICAST" },
+					 { IFF_ALLMULTI, "ALLMULTI" },
+					 { IFF_MASTER, "MASTER" },
+					 { IFF_SLAVE, "SLAVE" },
+					 { IFF_PORTSEL, "PORTSEL" },
+					 { IFF_AUTOMEDIA, "AUTOMEDIA" },
+					 { IFF_DYNAMIC, "DYNAMIC" },
+					 { IFF_RUNNING, "RUNNING" },
+					 { IFF_NOTRAILERS, "NOTRAILERS" },
+					 { 0, NULL } };
 
-/**
- * print_netdev_flags - Prints network interface flags.
- * @flags: Bitmask of interface flags (e.g., IFF_UP, IFF_BROADCAST).
- *
- * Output is in angle-bracket notation, e.g., <UP,BROADCAST,RUNNING>.
- */
 void print_netdev_flags(unsigned int flags)
 {
 	printf("<");
@@ -45,12 +36,6 @@ void print_netdev_flags(unsigned int flags)
 	printf(">");
 }
 
-/**
- * print_netdev_operstate - Prints network device operational state.
- * @operstate: Operational state value (e.g., IF_OPER_UP).
- *
- * Only common states are mapped to string names. Others default to UNKNOWN.
- */
 void print_netdev_operstate(unsigned int operstate)
 {
 	printf(" state ");
@@ -61,14 +46,6 @@ void print_netdev_operstate(unsigned int operstate)
 	printf("%s", states[operstate]);
 }
 
-/**
- * parse_into_netdev - Parses netlink attributes into an array of netdev structs.
- * @dev: Pointer to an array of struct netdev to be filled.
- * @nl_na: Pointer to the first netlink attribute.
- * @rem: Remaining length of attributes to process.
- *
- * Returns: number of parsed devices on success, -1 on error.
- */
 int parse_into_netdev(struct netdev *dev, struct nlattr *nl_na, size_t rem)
 {
 	if (!nl_na || !dev) {
@@ -133,13 +110,6 @@ int parse_into_netdev(struct netdev *dev, struct nlattr *nl_na, size_t rem)
 	return dev_count;
 }
 
-/**
- * print_netdevs - Prints formatted information for each network device.
- * @netdev: Pointer to array of struct netdev.
- * @n: Number of devices in the array.
- *
- * Returns: 0 on success.
- */
 int print_netdevs(struct netdev *netdev, int n)
 {
 	for (int i = 0; i < n; i++) {
@@ -148,8 +118,9 @@ int print_netdevs(struct netdev *netdev, int n)
 		print_netdev_flags(d->flags);
 		printf(" mtu %d", d->mtu);
 		print_netdev_operstate(d->operstate);
-		if (d->initialized_fields & NETDEV_QLEN_SET)
+		if (d->initialized_fields & NETDEV_QLEN_SET) {
 			printf(" qlen %d", d->qlen);
+		}
 		printf("\n    link/ether %02x:%02x:%02x:%02x:%02x:%02x brd %02x:%02x:%02x:%02x:%02x:%02x\n",
 		       d->ifmac[0], d->ifmac[1], d->ifmac[2], d->ifmac[3],
 		       d->ifmac[4], d->ifmac[5], d->ifbrd[0], d->ifbrd[1],
